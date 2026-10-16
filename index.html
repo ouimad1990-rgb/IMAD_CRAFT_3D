@@ -53,4 +53,236 @@ color:white;font-size:24px;text-shadow:1px 1px black;pointer-events:none}
   </div>
 </div>
 
-<script type="module
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const status = document.getElementById('status');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 18, 48);
+
+const camera = new THREE.PerspectiveCamera(
+  70, innerWidth / innerHeight, 0.1, 100
+);
+camera.rotation.order = 'YXZ';
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: 'high-performance'
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = false;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x65764b, 2));
+const sun = new THREE.DirectionalLight(0xffffff, 2);
+sun.position.set(8, 15, 6);
+scene.add(sun);
+
+const materials = {
+  grass: new THREE.MeshLambertMaterial({color:0x62ad42}),
+  dirt: new THREE.MeshLambertMaterial({color:0x79502e}),
+  stone: new THREE.MeshLambertMaterial({color:0x888888}),
+  wood: new THREE.MeshLambertMaterial({color:0x815126}),
+  leaves: new THREE.MeshLambertMaterial({color:0x287b35}),
+  sand: new THREE.MeshLambertMaterial({color:0xd8c47b})
+};
+const geo = new THREE.BoxGeometry(1,1,1);
+const blocks = new Map();
+const blockMeshes = [];
+const key = (x,y,z) => `${x},${y},${z}`;
+
+function addBlock(x,y,z,type='grass') {
+  x=Math.round(x); y=Math.round(y); z=Math.round(z);
+  const k=key(x,y,z);
+  if(blocks.has(k)) return;
+  const mesh=new THREE.Mesh(geo,materials[type]||materials.grass);
+  mesh.position.set(x,y,z);
+  mesh.userData={x,y,z,type};
+  scene.add(mesh);
+  blocks.set(k,mesh);
+  blockMeshes.push(mesh);
+}
+function removeBlock(mesh) {
+  if(!mesh || !mesh.userData) return;
+  const p=mesh.userData;
+  blocks.delete(key(p.x,p.y,p.z));
+  scene.remove(mesh);
+  const i=blockMeshes.indexOf(mesh);
+  if(i>=0) blockMeshes.splice(i,1);
+}
+
+// أرض منخفضة التفاصيل لتقليل التقطيع
+for(let x=-12;x<=12;x++){
+  for(let z=-12;z<=12;z++){
+    const hill = (Math.sin(x*.55)*Math.cos(z*.4) > .65) ? 1 : 0;
+    addBlock(x,-1,z,'dirt');
+    addBlock(x,0,z,hill?'stone':'grass');
+  }
+}
+
+// أشجار
+for(let n=0;n<15;n++){
+  const x=Math.floor(Math.random()*21)-10;
+  const z=Math.floor(Math.random()*21)-10;
+  if(Math.abs(x)<3 && Math.abs(z)<3) continue;
+  for(let y=1;y<=3;y++) addBlock(x,y,z,'wood');
+  for(let dx=-2;dx<=2;dx++){
+    for(let dz=-2;dz<=2;dz++){
+      for(let dy=3;dy<=5;dy++){
+        if(Math.abs(dx)+Math.abs(dz)+(dy===5?1:0)<4 &&
+           Math.random()>.08){
+          addBlock(x+dx,dy,z+dz,'leaves');
+        }
+      }
+    }
+  }
+}
+
+camera.position.set(0,2.2,5);
+let yaw=0, pitch=-0.12;
+let verticalSpeed=0, grounded=false;
+const held={};
+let selected='grass';
+const types=['grass','dirt','stone','wood'];
+let typeIndex=0;
+
+function bindHold(id,name){
+  const b=document.getElementById(id);
+  b.addEventListener('pointerdown',e=>{
+    e.preventDefault(); held[name]=true;
+    try{b.setPointerCapture(e.pointerId)}catch(_){}
+  });
+  const end=()=>held[name]=false;
+  b.addEventListener('pointerup',end);
+  b.addEventListener('pointercancel',end);
+  b.addEventListener('lostpointercapture',end);
+}
+bindHold('up','forward');
+bindHold('down','back');
+bindHold('left','left');
+bindHold('right','right');
+
+document.getElementById('jump').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  if(grounded){verticalSpeed=6.5;grounded=false}
+});
+
+const raycaster=new THREE.Raycaster();
+raycaster.far=6;
+
+function targetBlock(){
+  camera.updateMatrixWorld();
+  raycaster.setFromCamera(new THREE.Vector2(0,0),camera);
+  const hits=raycaster.intersectObjects(blockMeshes,false);
+  return hits.length?hits[0]:null;
+}
+document.getElementById('break').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  const hit=targetBlock();
+  if(hit) removeBlock(hit.object);
+});
+document.getElementById('place').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  const hit=targetBlock();
+  if(!hit)return;
+  const p=hit.object.position;
+  const n=hit.face.normal;
+  const x=Math.round(p.x+n.x);
+  const y=Math.round(p.y+n.y);
+  const z=Math.round(p.z+n.z);
+  if(Math.abs(x-camera.position.x)<1 &&
+     Math.abs(z-camera.position.z)<1 &&
+     y>=camera.position.y-2 && y<=camera.position.y+1) return;
+  addBlock(x,y,z,selected);
+});
+document.getElementById('change').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  typeIndex=(typeIndex+1)%types.length;
+  selected=types[typeIndex];
+  status.textContent='المكعب: '+selected;
+});
+
+// النظر باللمس في الجانب الأيمن من الشاشة
+let lookPointer=null,lastX=0,lastY=0;
+const lookArea=document.getElementById('look');
+lookArea.addEventListener('pointerdown',e=>{
+  lookPointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;
+  try{lookArea.setPointerCapture(e.pointerId)}catch(_){}
+});
+lookArea.addEventListener('pointermove',e=>{
+  if(lookPointer!==e.pointerId)return;
+  const dx=e.clientX-lastX,dy=e.clientY-lastY;
+  lastX=e.clientX;lastY=e.clientY;
+  yaw-=dx*.005;
+  pitch-=dy*.004;
+  pitch=Math.max(-1.35,Math.min(1.35,pitch));
+});
+function stopLook(e){if(lookPointer===e.pointerId)lookPointer=null}
+lookArea.addEventListener('pointerup',stopLook);
+lookArea.addEventListener('pointercancel',stopLook);
+
+// دعم لوحة المفاتيح عند فتح اللعبة على الكمبيوتر
+addEventListener('keydown',e=>{
+  if(e.code==='KeyW'||e.code==='ArrowUp')held.forward=true;
+  if(e.code==='KeyS'||e.code==='ArrowDown')held.back=true;
+  if(e.code==='KeyA'||e.code==='ArrowLeft')held.left=true;
+  if(e.code==='KeyD'||e.code==='ArrowRight')held.right=true;
+  if(e.code==='Space'&&grounded){verticalSpeed=6.5;grounded=false}
+});
+addEventListener('keyup',e=>{
+  if(e.code==='KeyW'||e.code==='ArrowUp')held.forward=false;
+  if(e.code==='KeyS'||e.code==='ArrowDown')held.back=false;
+  if(e.code==='KeyA'||e.code==='ArrowLeft')held.left=false;
+  if(e.code==='KeyD'||e.code==='ArrowRight')held.right=false;
+});
+
+let previous=performance.now();
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-previous)/1000,.04);
+  previous=now;
+
+  camera.rotation.set(pitch,yaw,0,'YXZ');
+  const speed=dt*4.5;
+  const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const side=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  const move=new THREE.Vector3();
+
+  if(held.forward)move.add(forward);
+  if(held.back)move.sub(forward);
+  if(held.right)move.add(side);
+  if(held.left)move.sub(side);
+  if(move.lengthSq()>0){
+    move.normalize().multiplyScalar(speed);
+    camera.position.x+=move.x;
+    camera.position.z+=move.z;
+  }
+
+  verticalSpeed-=14*dt;
+  camera.position.y+=verticalSpeed*dt;
+  if(camera.position.y<2.2){
+    camera.position.y=2.2;
+    verticalSpeed=0;
+    grounded=true;
+  }
+
+  camera.position.x=Math.max(-13,Math.min(13,camera.position.x));
+  camera.position.z=Math.max(-13,Math.min(13,camera.position.z));
+
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+status.textContent='العالم جاهز! اختر مكعبًا وابدأ البناء.';
+</script>
+</body>
+</html>
