@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>IMAD CRAFT 3D</title>
+<style>
+body{margin:0;overflow:hidden;font-family:Arial;background:#87ceeb}
+#game{width:100vw;height:100vh;display:block;touch-action:none}
+#title{position:absolute;top:8px;width:100%;text-align:center;color:white;font-size:23px;font-weight:bold;text-shadow:2px 2px 4px #333;pointer-events:none}
+#help{position:absolute;top:42px;width:100%;text-align:center;color:white;text-shadow:1px 1px 3px #333;font-size:12px;pointer-events:none}
+#controls{position:absolute;bottom:20px;left:12px;display:grid;grid-template-columns:50px 50px 50px;gap:5px}
+button{border:2px solid #fff9;border-radius:10px;background:#2229;color:white;font-size:20px;min-height:48px;touch-action:none}
+#jump{position:absolute;right:18px;bottom:28px;width:70px;height:70px}
+#actions{position:absolute;right:15px;bottom:112px;display:flex;gap:5px}
+#actions button{font-size:13px;padding:7px}
+</style>
+</head>
+<body>
+<div id="title">IMAD CRAFT 3D</div>
+<div id="help">اسحب الشاشة للنظر • اجمع المكعبات وابنِ عالمك</div>
+<canvas id="game"></canvas>
+<div id="controls">
+<button data-m="forward" style="grid-column:2">▲</button>
+<button data-m="left" style="grid-column:1;grid-row:2">◀</button>
+<button data-m="back" style="grid-column:2;grid-row:2">▼</button>
+<button data-m="right" style="grid-column:3;grid-row:2">▶</button>
+</div>
+<div id="actions">
+<button id="break">تكسير</button>
+<button id="place">بناء</button>
+</div>
+<button id="jump">قفز</button>
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+let W,H,blocks=[],keys={},yaw=0,pitch=0,px=0,pz=4,py=1.7,vy=0,ground=true,selected=0;
+const types=[
+['عشب','#58a83b'],['تراب','#956039'],['حجر','#888c91'],['خشب','#98602f']
+];
+function resize(){W=c.width=innerWidth*devicePixelRatio;H=c.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);W=innerWidth;H=innerHeight;draw()}
+addEventListener('resize',resize);
+function key(x,y,z,t=0){return x+','+y+','+z}
+function has(x,y,z){return blocks.some(b=>b.x===x&&b.y===y&&b.z===z)}
+for(let x=-12;x<=12;x++)for(let z=-12;z<=12;z++){
+blocks.push({x,y:0,z,t:0});
+if(Math.random()<.035)blocks.push({x,y:1,z,t:3});
+}
+for(let i=0;i<24;i++){let x=Math.floor(Math.random()*17)-8,z=Math.floor(Math.random()*17)-8;if(!has(x,1,z))blocks.push({x,y:1,z,t:1})}
+function project(x,y,z){
+x-=px;z-=pz;y-=py;
+let xx=x*Math.cos(yaw)-z*Math.sin(yaw),zz=x*Math.sin(yaw)+z*Math.cos(yaw);
+let depth=zz+9;
+if(depth<.2)return null;
+let f=Math.min(W,H)*.85/depth;
+return {x:W/2+xx*f,y:H*.48-(y*Math.cos(pitch)-zz*Math.sin(pitch))*f,f,depth};
+}
+function poly(points,color){ctx.fillStyle=color;ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fill();ctx.strokeStyle='#0002';ctx.stroke()}
+function cube(b){
+let v=[];
+for(let y=0;y<=1;y++)for(let z=0;z<=1;z++)for(let x=0;x<=1;x++)v.push(project(b.x+x-.5,b.y+y,b.z+z-.5));
+if(v.some(a=>!a))return;
+let p=(i)=>v[i];
+let top=[p(3),p(7),p(6),p(2)];
+let left=[p(0),p(2),p(6),p(4)];
+let right=[p(0),p(1),p(3),p(2)];
+let col=types[b.t][1];
+poly(top,types[b.t][1]);poly(left,shade(col,.72));poly(right,shade(col,.85));
+}
+function shade(hex,f){let n=parseInt(hex.slice(1),16);return '#'+[n>>16,(n>>8)&255,n&255].map(v=>Math.max(0,Math.min(255,Math.round(v*f))).toString(16).padStart(2,'0')).join('')}
+function draw(){
+if(!ctx)return;
+ctx.clearRect(0,0,W,H);
+let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#62b7ff');g.addColorStop(1,'#d7efff');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ctx.fillStyle='#fff7a8';ctx.beginPath();ctx.arc(W*.8,H*.15,28,0,7);ctx.fill();
+blocks.slice().sort((a,b)=>((b.x-px)**2+(b.z-pz)**2+(b.y-py)**2)-((a.x-px)**2+(a.z-pz)**2+(a.y-py)**2)).forEach(cube);
+ctx.strokeStyle='white';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(W/2-8,H/2);ctx.lineTo(W/2+8,H/2);ctx.moveTo(W/2,H/2-8);ctx.lineTo(W/2,H/2+8);ctx.stroke();
+ctx.fillStyle='#fff';ctx.font='14px Arial';ctx.fillText('المكعب: '+types[selected][0],12,H-12);
+}
+function move(){
+let speed=.09;
+if(keys.forward){px-=Math.sin(yaw)*speed;pz-=Math.cos(yaw)*speed}
+if(keys.back){px+=Math.sin(yaw)*speed;pz+=Math.cos(yaw)*speed}
+if(keys.left){px-=Math.cos(yaw)*speed;pz+=Math.sin(yaw)*speed}
+if(keys.right){px+=Math.cos(yaw)*speed;pz-=Math.sin(yaw)*speed}
+py+=vy;vy-=.012;if(py<1.7){py=1.7;vy=0;ground=true}
+draw();requestAnimationFrame(move)
+}
+document.querySelectorAll('[data-m]').forEach(b=>{
+let m=b.dataset.m;
+b.addEventListener('pointerdown',e=>{e.preventDefault();keys[m]=true});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,()=>keys[m]=false));
+});
+document.getElementById('jump').onclick=()=>{if(ground){vy=.22;ground=false}};
+document.getElementById('break').onclick=()=>{
+let target=blocks.filter(b=>b.y>=0).sort((a,b)=>((a.x-px)**2+(a.z-pz)**2+(a.y-py)**2)-((b.x-px)**2+(b.z-pz)**2+(b.y-py)**2))[0];
+if(target&&Math.hypot(target.x-px,target.z-pz)<5){blocks=blocks.filter(b=>b!==target);selected=target.t;draw()}
+};
+document.getElementById('place').onclick=()=>{
+let x=Math.round(px-Math.sin(yaw)*2),z=Math.round(pz-Math.cos(yaw)*2),y=1;
+if(!has(x,y,z))blocks.push({x,y,z,t:selected});
+draw()
+};
+let touching=false,lx=0,ly=0;
+c.addEventListener('pointerdown',e=>{touching=true;lx=e.clientX;ly=e.clientY});
+c.addEventListener('pointerup',()=>touching=false);
+c.addEventListener('pointercancel',()=>touching=false);
+c.addEventListener('pointermove',e=>{if(!touching)return;yaw+=(e.clientX-lx)*.008;pitch=Math.max(-.8,Math.min(.8,pitch+(e.clientY-ly)*.004));lx=e.clientX;ly=e.clientY;draw()});
+resize();move();
+</script>
+</body>
+                                                  </html>
